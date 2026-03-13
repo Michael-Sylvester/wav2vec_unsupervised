@@ -10,7 +10,6 @@ DATA_ROOT="$DIR_PATH/data" # a folder that stores all the data generated from pi
 FAIRSEQ_ROOT="$DIR_PATH/fairseq_" # the root directory of the fairseq repository
 KENLM_ROOT="$DIR_PATH/kenlm/build/bin"  # Path to KenLM installation
 VENV_PATH="$DIR_PATH/venv"    # Path to virtual environment (optional)
-# KALDI_ROOT="$DIR_PATH/pykaldi/tools/kaldi" # the root directory of the kaldi repository
 RVAD_ROOT="$DIR_PATH/rVADfast/src/rVADfast" # the root directory of the rVADfast repository
 
 GANS_OUTPUT_PHONES="$DATA_ROOT/transcription_phones"
@@ -27,9 +26,6 @@ OPENFST_PATH="$DIR_PATH/fairseq/examples/speech_recognition/kaldi/kaldi_initiali
 
 
 # Arguments/variables
-# TRAIN_DATASETS=$1 #/path/to/unlabelled/train_audio_data 
-# VAL_DATASETS=$2 #/path/to/unlabelled/validation_audio_data 
-# UNLABELLED_TEXT=$3 #/path/to/unlabelled_text_file 
 NEW_SAMPLE_PCT=0.5
 MIN_PHONES=3
 NEW_BATCH_SIZE=32
