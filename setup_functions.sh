@@ -298,16 +298,14 @@ install_flashlight() {
     log "--- Installing Flashlight (Text and Sequence) ---"
     cd "$INSTALL_ROOT"
 
-    sudo apt-get install pybind11-dev
+    sudo apt-get install -y pybind11-dev
 
-    # Ensure  nvcc is installed to before proceeding with GPU build
     log "Activating virtual environment: $VENV_PATH"
     source "$VENV_PATH/bin/activate"
 
-    # Install flashlight-text (Python-only package)
+    # Install flashlight-text
     log "Installing flashlight-text Python package..."
-    pip install flashlight-text \
-        || { log "[ERROR] Failed to install flashlight-text."; exit 1; }
+    pip install flashlight-text || { log "[ERROR] Failed to install flashlight-text."; exit 1; }
 
     # Clone or update the sequence repository
     if [ -d "$FLASHLIGHT_SEQ_ROOT" ]; then
@@ -316,54 +314,45 @@ install_flashlight() {
         git pull || { log "[WARN] Failed to pull latest flashlight sequence changes."; }
     else
         log "Cloning flashlight sequence repository..."
-        git clone https://github.com/flashlight/sequence.git "$FLASHLIGHT_SEQ_ROOT" \
-            || { log "[ERROR] Failed to clone flashlight sequence."; exit 1; }
+        git clone https://github.com/flashlight/sequence.git "$FLASHLIGHT_SEQ_ROOT" || { log "[ERROR] Failed to clone flashlight sequence."; exit 1; }
         cd "$FLASHLIGHT_SEQ_ROOT"
     fi
 
-    log "Configuring and Building flashlight sequence library WITH Python bindings..."
-    # Remove old build directory for a clean state
+    log "Configuring and Building flashlight sequence library..."
     rm -rf build
     mkdir build && cd build
 
- 
-    local flashlight_python_flag="-DFLASHLIGHT_BUILD_PYTHON=ON" # <--- CHECK THIS FLAG!
-    log "[INFO] Using CMake flag for Python bindings: $flashlight_python_flag (Verify this is correct!)"
-
-    export USE_CUDA=1 # Set if building for CUDA
+    local flashlight_python_flag="-DFLASHLIGHT_BUILD_PYTHON=ON"
+    local python_executable="$VENV_PATH/bin/python"
 
     if ! command -v nvcc &> /dev/null; then
         log "[INFO] nvcc not found. Switching to CPU-only build."
         use_cuda_flag="-DFLASHLIGHT_USE_CUDA=OFF"
         export USE_CUDA=0
-    # Explicitly point CMake to the Python executable in the venv for robustness
-    local python_executable="$VENV_PATH/bin/python"
+    else
+        use_cuda_flag="-DFLASHLIGHT_USE_CUDA=ON"
+        export USE_CUDA=1
+    fi # <--- This 'fi' was missing!
+
     cmake .. -DCMAKE_BUILD_TYPE=Release \
              -DPYTHON_EXECUTABLE="$python_executable" \
              "$flashlight_python_flag" \
-             "$use_cuda_flag" \
+             "$use_cuda_flag"
 
-    # Build the C++ library AND Python bindings
     log "Building Flashlight sequence (C++ and Python)..."
-    cmake --build . --config Release --parallel "$(nproc)" \
-     
-    # Install the Python Bindings into the ACTIVE virtual environment
+    cmake --build . --config Release --parallel "$(nproc)"
+
     log "Installing Flashlight sequence Python bindings into venv..."
-    # This assumes setup.py or similar is generated in the build directory.
     cd ..
-    pip install . \
+    pip install .
 
-    log "[PASS] Flashlight Python bindings installed via pip."
-
-    cd "$INSTALL_ROOT" # Go back to install root
-    log "Flashlight installation steps completed."
-
-    # --- Re-install fairseq AFTER Flashlight bindings are in venv ---
+    log "[PASS] Flashlight Python bindings installed."
+    cd "$INSTALL_ROOT"
+    
     log "Re-installing fairseq to ensure it picks up Flashlight bindings..."
-    install_fairseq # Call the fairseq install function again (it will activate/deactivate venv)
+    install_fairseq 
 
     log "--- Flashlight Installation Finished ---"
-    # Final deactivate handled by install_fairseq
 }
 
 #  Download pre-trained wav2vec model
