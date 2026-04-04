@@ -98,10 +98,10 @@ Audio and text inputs are independent and do not require alignment.
 * Audio files should have consistent sampling rates (recommended: 16 kHz)
 
 ```
-./run_wav2vec.sh "/path/to/train_audio_dataset" \
-                "/path/to/val_audio_dataset" \
-                "/path/to/test_audio_dataset" \
-                "/path/to/unlabelled/text_dataset"
+./run_wav2vec.sh "/Data/Train" \
+                "/Data/Val" \
+                "/Data/Test" \
+                "/Data/Text"
 ```
 
 
