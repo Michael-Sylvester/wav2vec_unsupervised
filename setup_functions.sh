@@ -11,13 +11,16 @@ set -x                       # Print each command for debugging
 # Set these variables according to your environment
 
 # Main directories
-INSTALL_ROOT="$HOME/wav2vec_unsupervised"
+INSTALL_ROOT="/workspaces/wav2vec_unsupervised"
 FAIRSEQ_ROOT="$INSTALL_ROOT/fairseq_"
 KENLM_ROOT="$INSTALL_ROOT/kenlm"
 VENV_PATH="$INSTALL_ROOT/venv"
 RVADFAST_ROOT="$INSTALL_ROOT/rVADfast"
 FLASHLIGHT_SEQ_ROOT="$INSTALL_ROOT/sequence"
-
+VENV_PATH="$INSTALL_ROOT/venv"
+# Define the absolute paths to the venv executables
+VENV_PIP="$VENV_PATH/bin/pip"
+VENV_PYTHON="$VENV_PATH/bin/python"
 
 # Python version
 PYTHON_VERSION="3.10"  # Options: 3.7, 3.8, 3.9, 3.10
@@ -25,6 +28,17 @@ CUDA="12.3"
 
 
 # ==================== HELPER FUNCTIONS ====================
+
+# To ensure we only install to venv
+safe_pip_install() {
+    if [ ! -f "$VENV_PIP" ]; then
+        log "CRITICAL ERROR: Virtual environment not found at $VENV_PATH."
+        log "Please run setup_venv first. Aborting to prevent system pollution."
+        exit 1
+    fi
+    # Execute the specific pip inside the venv
+    "$VENV_PIP" install "$@"
+}
 
 # Log message with timestamp
 log() {
@@ -40,7 +54,7 @@ command_exists() {
 }
 
 get_system_cuda_suffix() {
-    if ! command -v nvcc --version >/dev/null 2>&1; then
+    if ! command -v nvcc >/dev/null 2>&1; then
         log "ERROR: nvcc (NVIDIA CUDA Compiler) not found in PATH. Cannot determine CUDA version for GPU packages."
         exit 1
     fi
@@ -92,13 +106,19 @@ setup_venv() {
 
 #installing_python_basic_dependencies
 basic_dependencies(){
+    # Perform a full update after changing repository sources
+    log "Updating package lists after repository changes..."
     sudo apt-get update
-    # Install Python 3, pip, and essential development packages (for compiling C extensions)
-    sudo apt-get install -y python3 python3-pip python3-dev build-essential 
-    sudo apt-get install autoconf automake cmake curl g++ git graphviz libatlas3-base libtool make pkg-config subversion unzip wget zlib1g-dev gfortran
-    sudo apt update
-    sudo apt install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libffi-dev liblzma-dev wget curl
-    sudo apt install software-properties-common
+
+    # Install all necessary development packages
+    log "Installing all basic dependencies..."
+    sudo apt-get install -y --fix-missing \
+        python3 python3-pip python3-dev python3-venv \
+        build-essential autoconf automake cmake curl g++ git graphviz \
+        libatlas3-base libtool make pkg-config subversion unzip wget zlib1g-dev gfortran \
+        libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev \
+        xz-utils tk-dev libffi-dev liblzma-dev wget curl
+    
 
 }
 
@@ -176,25 +196,27 @@ install_pytorch_and_other_packages() {
     log "Installing PyTorch and related packages..."
     source "$VENV_PATH/bin/activate"
   
+    safe_pip_install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 \
+        --index-url "https://download.pytorch.org/whl/cu121" --no-cache-dir
     
-    pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url "https://download.pytorch.org/whl/cu121"
-
     # Install other required packages
-    pip install "numpy<2" scipy tqdm sentencepiece soundfile librosa editdistance tensorboardX packaging soundfile
-    pip install npy-append-array h5py kaldi-io g2p_en
+    safe_pip_install install "numpy<2" scipy tqdm sentencepiece soundfile librosa editdistance tensorboardX packaging soundfile
+    safe_pip_install install npy-append-array h5py kaldi-io g2p_en
 
-    if ! command -v nvcc --version >/dev/null 2>&1; then
-         pip install faiss-cpu
+    if ! command -v nvcc >/dev/null 2>&1; then
+         safe_pip_install install faiss-cpu
     else
-        pip install faiss-gpu
+        safe_pip_install install faiss-gpu
     fi
     
-    pip install ninja
-    pip install torchcodec
-    sudo apt install zsh
+    safe_pip_install install ninja
+    safe_pip_install install torchcodec
     python -c "import nltk; nltk.download('averaged_perceptron_tagger_eng')" # we install this to efficiently use the phonemizer G2p
 
     log "PyTorch and related packages installed successfully."
+    
+    sudo apt install zsh
+    log "zsh installed successfully."
 }
 
 # Clone and install fairseq
@@ -219,14 +241,14 @@ install_fairseq() {
     fi
 
     log "Installing fairseq in editable mode..."
-    pip install --editable ./ \
+    safe_pip_install install --editable ./ \
         || { log "[ERROR] Failed to install fairseq in editable mode."; exit 1; }
 
     # Install wav2vec specific requirements if the file exists
     local wav2vec_req_file="$FAIRSEQ_ROOT/examples/wav2vec/requirements.txt"
     if [ -f "$wav2vec_req_file" ]; then
         log "Installing wav2vec specific requirements from $wav2vec_req_file..."
-        pip install -r "$wav2vec_req_file" \
+        safe_pip_install install -r "$wav2vec_req_file" \
             || { log "[WARN] Failed to install some wav2vec requirements. Check $wav2vec_req_file."; }
     else
         log "[INFO] No specific requirements file found at $wav2vec_req_file."
@@ -305,7 +327,7 @@ install_flashlight() {
 
     # Install flashlight-text
     log "Installing flashlight-text Python package..."
-    pip install flashlight-text || { log "[ERROR] Failed to install flashlight-text."; exit 1; }
+    safe_pip_install flashlight-text || { log "[ERROR] Failed to install flashlight-text."; exit 1; }
 
     # Clone or update the sequence repository
     if [ -d "$FLASHLIGHT_SEQ_ROOT" ]; then
@@ -344,7 +366,7 @@ install_flashlight() {
 
     log "Installing Flashlight sequence Python bindings into venv..."
     cd ..
-    pip install .
+    "$VENV_PIP" install .
 
     log "[PASS] Flashlight Python bindings installed."
     cd "$INSTALL_ROOT"
@@ -385,7 +407,7 @@ download_languageIdentification_model() {
     fi
 
     source "$VENV_PATH/bin/activate"
-    pip install fasttext
+    "$VENV_PIP" install fasttext
     
     log "Language identification model downloaded successfully."
 }
