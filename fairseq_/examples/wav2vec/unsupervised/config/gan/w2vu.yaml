@@ -10,8 +10,9 @@ common:
   suppress_crashes: false
 
 checkpoint:
-  save_interval: 1000
-  save_interval_updates: 1000
+  # Smaller dataset: save more often so you can recover/pick best checkpoint sooner.
+  save_interval: 250
+  save_interval_updates: 250
   no_epoch_checkpoints: true
   best_checkpoint_metric: weighted_lm_ppl
   save_dir: .
@@ -32,11 +33,14 @@ task:
 
 dataset:
   num_workers: 6
-  batch_size: 160
+  # Lower-resource setting (~4.2k train / 400 valid): reduce batch to increase update frequency
+  # and avoid overly-smooth gradients early in training.
+  batch_size: 64
   skip_invalid_size_inputs_valid_test: true
   valid_subset: valid
-  validate_interval: 1000
-  validate_interval_updates: 1000
+  # Validate more often so the best-checkpoint metric is meaningful early.
+  validate_interval: 250
+  validate_interval_updates: 250
 
 criterion:
   _name: model
@@ -47,7 +51,8 @@ criterion:
     - code_ppl
 
 optimization:
-  max_update: 150000
+  # Fewer total updates are usually sufficient for small datasets and helps avoid overfitting.
+  max_update: 50000
   clip_norm: 5.0
   lr: [0]
 
