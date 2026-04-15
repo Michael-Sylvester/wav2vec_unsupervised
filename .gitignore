@@ -1,1 +1,29 @@
-Data/*
+# Generated data/artifacts (pipeline outputs)
+data/
+Data/
+
+# Local environment
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Local clones / build trees created by setup scripts
+kenlm/
+lid_model/
+pre-trained/
+rVADfast/
+sequence/
+
+# Kaggle credentials (never commit)
+.kaggle/
+
+# Large archives / downloads
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Logs / temp files
+*.log
+*.bak

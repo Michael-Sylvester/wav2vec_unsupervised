@@ -11,7 +11,7 @@ set -x                       # Print each command for debugging
 # Set these variables according to your environment
 
 # Main directories
-INSTALL_ROOT="/workspaces/wav2vec_unsupervised"
+INSTALL_ROOT="/home/mike/wav2vec_unsupervised"
 FAIRSEQ_ROOT="$INSTALL_ROOT/fairseq_"
 KENLM_ROOT="$INSTALL_ROOT/kenlm"
 VENV_PATH="$INSTALL_ROOT/venv"
@@ -73,33 +73,27 @@ create_dirs() {
 setup_venv() {
     log "Setting up Python virtual environment..."
     
-     #setting up pyenv to tackle linkage errors, protobuf requires a python environment which is not static 
-    export PYENV_ROOT="$HOME/.pyenv"
-
-    # Install pyenv ONLY if not already installed
-    if [ ! -d "$PYENV_ROOT" ]; then
-        curl -fsSL https://pyenv.run | bash
-            export PYENV_ROOT="$HOME/.pyenv"
-            [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-            eval "$(pyenv init - bash)"
-        echo "Detected Python version: $PYTHON_VERSION"
-        env PYTHON_CONFIGURE_OPTS="--enable-shared" pyenv install $PYTHON_VERSION
-        pyenv local $PYTHON_VERSION
-    else
-        log "Python $PYENV_ROOT already installed."
-    fi
-   
-    
     if [ -d "$VENV_PATH" ]; then
         log "Virtual environment already exists at $VENV_PATH"
     else
-        # python${PYTHON_VERSION} -m venv "$VENV_PATH"
-        python3 -m venv "$VENV_PATH"
+        if ! command -v "python${PYTHON_VERSION}" >/dev/null 2>&1; then
+            log "CRITICAL ERROR: python${PYTHON_VERSION} not found. Install it first (run basic_dependencies)."
+            exit 1
+        fi
+        "python${PYTHON_VERSION}" -m venv "$VENV_PATH"
         log "Created virtual environment at $VENV_PATH"
     fi
     
     # Activate virtual environment
     source "$VENV_PATH/bin/activate"
+
+    local venv_py_version
+    venv_py_version=$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    if [[ "$venv_py_version" != "$PYTHON_VERSION" ]]; then
+        log "CRITICAL ERROR: venv python is $venv_py_version, expected $PYTHON_VERSION."
+        log "Delete $VENV_PATH and rerun setup_venv after ensuring python${PYTHON_VERSION} is installed."
+        exit 1
+    fi
 
     log "Python virtual environment setup completed."
 }
@@ -110,14 +104,26 @@ basic_dependencies(){
     log "Updating package lists after repository changes..."
     sudo apt-get update
 
+    # Ubuntu 24.04 (noble) does not include python3.10-* packages by default.
+    # We enable deadsnakes PPA to provide Python 3.10 when needed.
+    if ! apt-cache show python3.10-venv >/dev/null 2>&1; then
+        log "[INFO] python3.10-venv not available in current apt sources. Enabling deadsnakes PPA..."
+        sudo apt-get install -y --fix-missing software-properties-common ca-certificates
+        sudo add-apt-repository -y ppa:deadsnakes/ppa
+        sudo apt-get update
+    fi
+
     # Install all necessary development packages
     log "Installing all basic dependencies..."
     sudo apt-get install -y --fix-missing \
-        python3 python3-pip python3-dev python3-venv \
+        python3-pip \
+        python3.10 python3.10-dev python3.10-venv \
         build-essential autoconf automake cmake curl g++ git graphviz \
         libatlas3-base libtool make pkg-config subversion unzip wget zlib1g-dev gfortran \
         libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev \
         xz-utils tk-dev libffi-dev liblzma-dev wget curl
+
+    sudo apt-get install -y --fix-missing ffmpeg
     
 
 }
@@ -196,26 +202,61 @@ install_pytorch_and_other_packages() {
     log "Installing PyTorch and related packages..."
     source "$VENV_PATH/bin/activate"
   
+    local pytorch_index_url
+    if command -v nvcc >/dev/null 2>&1; then
+        pytorch_index_url="https://download.pytorch.org/whl/cu121"
+        log "[INFO] CUDA toolchain detected (nvcc found). Installing CUDA-enabled PyTorch wheels."
+    else
+        pytorch_index_url="https://download.pytorch.org/whl/cpu"
+        log "[INFO] CUDA toolchain not detected. Installing CPU-only PyTorch wheels."
+    fi
+
     safe_pip_install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 \
-        --index-url "https://download.pytorch.org/whl/cu121" --no-cache-dir
+        --index-url "$pytorch_index_url" --no-cache-dir
     
     # Install other required packages
-    safe_pip_install install "numpy<2" scipy tqdm sentencepiece soundfile librosa editdistance tensorboardX packaging soundfile
-    safe_pip_install install npy-append-array h5py kaldi-io g2p_en
+    safe_pip_install "numpy<2" scipy tqdm sentencepiece soundfile librosa editdistance tensorboardX packaging
+    safe_pip_install npy-append-array h5py kaldi-io g2p_en
+    safe_pip_install kaggle
 
-    if ! command -v nvcc >/dev/null 2>&1; then
-         safe_pip_install install faiss-cpu
+    # Pre-fetch NLTK corpora needed by g2p_en (cmudict + tagger). Download into the venv to avoid polluting $HOME.
+    export NLTK_DATA="$VENV_PATH/nltk_data"
+    mkdir -p "$NLTK_DATA"
+    python - <<'PY'
+import os
+import nltk
+
+dl_dir = os.environ.get("NLTK_DATA")
+pkgs = [
+    "cmudict",
+    "averaged_perceptron_tagger",
+    "averaged_perceptron_tagger_eng",
+]
+for pkg in pkgs:
+    try:
+        nltk.data.find(pkg if "/" in pkg else f"corpora/{pkg}")
+        continue
+    except Exception:
+        pass
+    try:
+        nltk.download(pkg, download_dir=dl_dir, quiet=True)
+    except Exception as e:
+        print(f"[WARN] NLTK download failed for {pkg}: {e}")
+PY
+
+    if command -v nvcc >/dev/null 2>&1; then
+        safe_pip_install faiss-gpu
     else
-        safe_pip_install install faiss-gpu
+        safe_pip_install faiss-cpu
     fi
     
-    safe_pip_install install ninja
-    safe_pip_install install torchcodec
-    python -c "import nltk; nltk.download('averaged_perceptron_tagger_eng')" # we install this to efficiently use the phonemizer G2p
+    safe_pip_install ninja
+    safe_pip_install torchcodec
+    # NLTK downloads handled above (NLTK_DATA pinned to venv).
 
     log "PyTorch and related packages installed successfully."
     
-    sudo apt install zsh
+    sudo apt-get install -y zsh
     log "zsh installed successfully."
 }
 
@@ -224,7 +265,9 @@ install_fairseq() {
     log "--- Installing fairseq ---"
     log "Activating virtual environment: $VENV_PATH"
     source "$VENV_PATH/bin/activate"
-     pip install "pip==24.0"
+    pip install "pip==24.0"
+    # Ensure common build tooling exists in the venv so we can disable build isolation safely.
+    safe_pip_install -U setuptools wheel cython
     # source "$VENV_PATH/bin/activate"
 
     cd "$INSTALL_ROOT"
@@ -241,14 +284,15 @@ install_fairseq() {
     fi
 
     log "Installing fairseq in editable mode..."
-    safe_pip_install install --editable ./ \
+    # Avoid PEP517 build isolation which can pull heavyweight deps (e.g., torch) into a temp env and stall.
+    safe_pip_install --no-build-isolation --editable ./ \
         || { log "[ERROR] Failed to install fairseq in editable mode."; exit 1; }
 
     # Install wav2vec specific requirements if the file exists
     local wav2vec_req_file="$FAIRSEQ_ROOT/examples/wav2vec/requirements.txt"
     if [ -f "$wav2vec_req_file" ]; then
         log "Installing wav2vec specific requirements from $wav2vec_req_file..."
-        safe_pip_install install -r "$wav2vec_req_file" \
+        safe_pip_install -r "$wav2vec_req_file" \
             || { log "[WARN] Failed to install some wav2vec requirements. Check $wav2vec_req_file."; }
     else
         log "[INFO] No specific requirements file found at $wav2vec_req_file."

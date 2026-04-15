@@ -379,8 +379,31 @@ prepare_text() {
         return 0
     fi
 
-    log "audio preparation."
+    log "text preparation."
     mark_in_progress "$step_name"
+
+    # The fairseq script expects a *file* to be redirected into stdin.
+    # If a directory was passed, try the common default filename; otherwise fail fast.
+    if [ -d "$UNLABELLED_TEXT" ]; then
+        if [ -f "$UNLABELLED_TEXT/unlabelled.txt" ]; then
+            UNLABELLED_TEXT="$UNLABELLED_TEXT/unlabelled.txt"
+        else
+            log "ERROR: UNLABELLED_TEXT is a directory ($UNLABELLED_TEXT). Expected a text file path."
+            log "       Provide the file (e.g. Data/Text/unlabelled.txt)."
+            exit 1
+        fi
+    fi
+    if [ ! -f "$UNLABELLED_TEXT" ]; then
+        log "ERROR: UNLABELLED_TEXT file not found: $UNLABELLED_TEXT"
+        exit 1
+    fi
+
+    if [ ! -x "$KENLM_ROOT/lmplz" ] || [ ! -x "$KENLM_ROOT/build_binary" ]; then
+        log "ERROR: KenLM binaries not found/executable under KENLM_ROOT=$KENLM_ROOT"
+        log "       Expected: $KENLM_ROOT/lmplz and $KENLM_ROOT/build_binary"
+        exit 1
+    fi
+
     replace_std_endl $ADD_SELF_LOOP_SIMPLE  # this replaces the fixes error caused by the old script std::endl with \n
     zsh "$FAIRSEQ_ROOT/examples/wav2vec/unsupervised/scripts/prepare_text.sh" $LANG $UNLABELLED_TEXT $TEXT_OUTPUT $MIN_PHONES $PHONEMIZER "$FASTTEXT_LIB_MODEL" 0.25 
     # Check if the command was successful
