@@ -415,8 +415,12 @@ class Wav2vec_U(BaseFairseqModel):
 
         gen_result = self.generator(features, random_label, padding_mask)
 
-        orig_dense_x, token_x = gen_result["dense_x"], gen_result["token_x"]
+        # generator may not return `token_x` when `tokens` (random_label)
+        # is not provided (e.g., validation without unpaired text). Use
+        # get() to avoid KeyError and guard later usages.
+        orig_dense_x = gen_result["dense_x"]
         orig_dense_padding_mask = gen_result["dense_padding_mask"]
+        token_x = gen_result.get("token_x", None)
 
         if segment:
             dense_x, dense_padding_mask = self.segmenter.logit_segment(
@@ -439,10 +443,15 @@ class Wav2vec_U(BaseFairseqModel):
                 "padding_mask": dense_padding_mask,
             }
 
-        token_padding_mask = random_label == self.pad
+        # token_x and random_label may be None for validation (no text input).
+        if token_x is not None and random_label is not None:
+            token_padding_mask = random_label == self.pad
+            token_y = self.discriminator(token_x, token_padding_mask)
+        else:
+            token_padding_mask = None
+            token_y = None
 
         dense_y = self.discriminator(dense_x, dense_padding_mask)
-        token_y = self.discriminator(token_x, token_padding_mask)
 
         sample_size = features.size(0)
 
@@ -464,12 +473,16 @@ class Wav2vec_U(BaseFairseqModel):
                 dense_y.new_ones(dense_y.shape) - fake_smooth,
                 reduction="sum",
             )
-            loss_token = F.binary_cross_entropy_with_logits(
-                token_y,
-                token_y.new_zeros(token_y.shape) + real_smooth,
-                reduction="sum",
-            )
-            if self.training and self.gradient_penalty > 0:
+            if token_y is not None:
+                loss_token = F.binary_cross_entropy_with_logits(
+                    token_y,
+                    token_y.new_zeros(token_y.shape) + real_smooth,
+                    reduction="sum",
+                )
+            else:
+                loss_token = None
+
+            if self.training and self.gradient_penalty > 0 and token_x is not None:
                 grad_pen = self.calc_gradient_penalty(token_x, dense_x)
                 grad_pen = grad_pen.sum() * self.gradient_penalty
             else:

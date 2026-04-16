@@ -52,7 +52,7 @@ criterion:
 
 optimization:
   # Fewer total updates are usually sufficient for small datasets and helps avoid overfitting.
-  max_update: 50000
+  max_update: 5000
   clip_norm: 5.0
   lr: [0]
 
